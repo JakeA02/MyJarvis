@@ -190,7 +190,7 @@ async def get_article(article_id: int):
         raise HTTPException(status_code=500, detail=f"Error retrieving article: {str(e)}")
 
 @app.get("/latest", response_model=List[Article], tags=["Articles"])
-async def get_latest_articles(limit: int = Query(5, ge=1, le=20, description="Number of latest articles")):
+async def get_latest_articles(limit: int = Query(8, ge=1, le=20, description="Number of latest articles")):
     """
     Get the latest BBC news articles
     
