@@ -1,0 +1,19 @@
+# API Framework
+fastapi==0.104.1
+uvicorn==0.23.2
+pydantic==2.4.2
+numpy==1.26.4
+
+# AWS
+boto3==1.28.64
+
+# Database
+pandas==2.1.1
+
+# Web Scraping
+requests==2.31.0
+beautifulsoup4==4.12.2
+fake-useragent==1.2.1
+
+# Environment Variables
+python-dotenv==1.0.0

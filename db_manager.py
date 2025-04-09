@@ -1,24 +1,42 @@
 import sqlite3
 import pandas as pd
 import datetime
+import os
+import boto3
+from botocore.exceptions import ClientError
 
-class BBCDatabaseManager:
+class S3BBCDatabaseManager:
     """
-    A class to manage database operations for BBC articles
+    An extension of BBCDatabaseManager that syncs with S3
     """
     
-    def __init__(self, db_name='bbc_articles.db'):
+    def __init__(self, bucket_name, db_name='bbc_articles.db', local_db_path=None):
         """
-        Initialize the database connection and set up the tables
+        Initialize the database connection and set up S3 syncing
+        
+        Args:
+            bucket_name (str): Name of the S3 bucket
+            db_name (str): Name of the database file in S3
+            local_db_path (str): Path to store the local copy (default: same as db_name)
         """
+        self.bucket_name = bucket_name
         self.db_name = db_name
+        self.local_db_path = local_db_path or db_name
+        
+        # Initialize S3 client
+        self.s3_client = boto3.client('s3')
+        
+        # First, try to download the database from S3
+        self.download_from_s3()
+        
+        # Initialize the database connection
         self.conn = self.setup_database()
     
     def setup_database(self):
         """
         Create the database and tables if they don't exist
         """
-        conn = sqlite3.connect(self.db_name)
+        conn = sqlite3.connect(self.local_db_path)
         cursor = conn.cursor()
         
         # Create the articles table
@@ -36,12 +54,53 @@ class BBCDatabaseManager:
         conn.commit()
         return conn
     
+    def download_from_s3(self):
+        """
+        Download the database from S3 if it exists
+        """
+        try:
+            print(f"Attempting to download database from S3 bucket '{self.bucket_name}'...")
+            self.s3_client.download_file(
+                self.bucket_name, 
+                self.db_name, 
+                self.local_db_path
+            )
+            print(f"Successfully downloaded database from S3 to {self.local_db_path}")
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                print(f"Database file '{self.db_name}' not found in S3 bucket. A new one will be created.")
+            else:
+                print(f"Error downloading database from S3: {e}")
+            return False
+    
+    def upload_to_s3(self):
+        """
+        Upload the database to S3
+        """
+        try:
+            print(f"Uploading database to S3 bucket '{self.bucket_name}'...")
+            self.s3_client.upload_file(
+                self.local_db_path,
+                self.bucket_name,
+                self.db_name
+            )
+            print(f"Successfully uploaded database to S3")
+            return True
+        except ClientError as e:
+            print(f"Error uploading database to S3: {e}")
+            return False
+    
     def close_connection(self):
         """
-        Close the database connection
+        Close the database connection and upload to S3
         """
         if self.conn:
             self.conn.close()
+            # Upload to S3 when closing
+            self.upload_to_s3()
+    
+    # The following methods are the same as your original BBCDatabaseManager
     
     def article_exists(self, url):
         """

@@ -1,10 +1,19 @@
+import os
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 import time
 import random
 from fake_useragent import UserAgent
-from db_manager import BBCDatabaseManager
+from dotenv import load_dotenv
+from db_manager import S3BBCDatabaseManager
+
+# Load environment variables from .env file if it exists
+load_dotenv()
+
+# AWS S3 Configuration
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
+DB_NAME = 'bbc_articles.db'
+LOCAL_DB_PATH = 'bbc_articles.db' 
 
 def get_bbc_article_links():
     """
@@ -109,6 +118,7 @@ def get_article_content(article_url, headers):
         
         # Combine paragraphs into a single text
         body_text = " ".join([p.text.strip() for p in paragraphs if p.text.strip()])
+        body_text = body_text[:600] #get only the first ~100 words. Angle + a few details
         
         return {
             "title": title,
@@ -205,31 +215,62 @@ def scrape_bbc_articles_to_db(db_manager, max_articles=10):
     
     return articles_saved
 
+def main():
+    """
+    Main function to run the scraper and sync with S3
+    """
+    # Validate S3 configuration
+    if not S3_BUCKET_NAME:
+        print("Error: S3_BUCKET_NAME environment variable is not set")
+        print("Please set the required environment variables:")
+        print("  - S3_BUCKET_NAME: Your S3 bucket name")
+        print("  - AWS_ACCESS_KEY_ID: Your AWS access key")
+        print("  - AWS_SECRET_ACCESS_KEY: Your AWS secret key")
+        return
+    
+    # Check if AWS credentials are set
+    if not (os.environ.get('AWS_ACCESS_KEY_ID') and os.environ.get('AWS_SECRET_ACCESS_KEY')):
+        print("Warning: AWS credentials not found in environment variables")
+        print("Using IAM role or AWS CLI configuration if available")
+    
+    print(f"Initializing S3 database manager with bucket: {S3_BUCKET_NAME}")
+    
+    # Initialize the S3 database manager
+    db_manager = S3BBCDatabaseManager(
+        bucket_name=S3_BUCKET_NAME,
+        db_name=DB_NAME,
+        local_db_path=LOCAL_DB_PATH
+    )
+    
+    try:
+        # Scrape articles and save to database
+        print("Starting BBC news scraping process...")
+        articles_saved = scrape_bbc_articles_to_db(db_manager, max_articles=10)
+        
+        if articles_saved > 0:
+            print(f"\nSuccessfully saved {articles_saved} new articles to the database.")
+            
+            # Display recently added articles
+            print("\nRecently added articles:")
+            recent_articles = db_manager.get_recent_articles(10)
+            
+            for i, row in recent_articles.iterrows():
+                print(f"\n--- Article {i+1} ---")
+                print(f"Title: {row['title']}")
+                print(f"URL: {row['url']}")
+                print(f"Date scraped: {row['date_scraped']}")
+            
+            # Count total articles in database
+            total_count = db_manager.get_total_count()
+            print(f"\nTotal articles in database: {total_count}")
+        else:
+            print("No new articles were saved to the database.")
+    
+    finally:
+        # Always close the connection and upload to S3
+        print("Closing database connection and syncing with S3...")
+        db_manager.close_connection()
+        print("Database sync complete.")
+
 if __name__ == "__main__":
-    # Initialize the database manager
-    db_manager = BBCDatabaseManager()
-    
-    # Scrape articles and save to database
-    articles_saved = scrape_bbc_articles_to_db(db_manager, max_articles=10)
-    
-    if articles_saved > 0:
-        print(f"\nSuccessfully saved {articles_saved} new articles to the database.")
-        
-        # Display recently added articles
-        print("\nRecently added articles:")
-        recent_articles = db_manager.get_recent_articles(5)
-        
-        for i, row in recent_articles.iterrows():
-            print(f"\n--- Article {i+1} ---")
-            print(f"Title: {row['title']}")
-            print(f"URL: {row['url']}")
-            print(f"Date scraped: {row['date_scraped']}")
-        
-        # Count total articles in database
-        total_count = db_manager.get_total_count()
-        print(f"\nTotal articles in database: {total_count}")
-    else:
-        print("No new articles were saved to the database.")
-    
-    # Close the database connection
-    db_manager.close_connection()
+    main()
