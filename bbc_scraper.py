@@ -17,10 +17,10 @@ LOCAL_DB_PATH = 'bbc_articles.db'
 
 def get_bbc_article_links():
     """
-    Scrape the BBC News homepage to get article links
+    Scrape the BBC News homepage to get only main featured article links
     """
     # BBC News homepage
-    url = "https://www.bbc.com/news"
+    url = "https://www.bbc.com/"
     
     # Use rotating user agents to avoid detection
     ua = UserAgent()
@@ -43,17 +43,29 @@ def get_bbc_article_links():
         
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # Find all h2 elements that contain article titles
+        # Find main featured articles
         articles = []
-        headline_elements = soup.select("h2")
-        for headline in headline_elements:
+        
+        # Target the main stories section
+        main_section = soup.select_one('section[data-testid="vermont-section-outer"]')
+        if not main_section:
+            print("Main section not found. BBC may have changed their HTML structure.")
+            return []
+            
+        # Process regular articles
+        featured_cards = main_section.select('div[data-testid="dundee-card"], div[data-testid="manchester-card"]')
+        for card in featured_cards:
             try:
-                # Find the parent link that contains the URL
-                link_element = headline.find_parent("a", href=True)
-                
+                # Find the link element
+                link_element = card.select_one('a[data-testid="internal-link"]')
                 if not link_element:
                     continue
                 
+                # Find the headline
+                headline = card.select_one('h2[data-testid="card-headline"]')
+                if not headline:
+                    continue
+                    
                 title = headline.text.strip()
                 link = link_element["href"]
                 
@@ -61,26 +73,54 @@ def get_bbc_article_links():
                 if not link.startswith("http"):
                     link = f"https://www.bbc.com{link}"
                 
-                # Skip non-article links like video/live pages
+                # Check if it's a live page
+                is_live = False
                 if "/live/" in link:
-                    articles.append({
-                        "title": title, 
-                        "url": link,
-                        "live": True,
-                    })
+                    is_live = True
+                # Skip non-article links like video pages
+                if "/av/" in link or "/videos/" in link:
                     continue
-                if "/av/" in link:
-                    continue
-    
+                
                 articles.append({
                     "title": title,
                     "url": link,
-                    "live": False,
+                    "live": is_live,
                 })
             except Exception as e:
                 print(f"Error extracting article link: {e}")
         
-        return articles
+        # Process live articles (they have a different structure)
+        live_cards = main_section.select('div[data-testid="westminster-card"]')
+        for card in live_cards:
+            try:
+                # Live updates have a different link type
+                link_element = card.select_one('a[data-testid="external-anchor"]')
+                if not link_element:
+                    continue
+                
+                # Find the headline
+                headline = card.select_one('h2[data-testid="card-headline"]')
+                if not headline:
+                    print("Continuing")
+                    continue
+                    
+                title = headline.text.strip()
+                link = link_element["href"]
+                
+                # Ensure the link is absolute
+                if not link.startswith("http"):
+                    link = f"https://www.bbc.com{link}"
+                
+                articles.append({
+                    "title": title,
+                    "url": link,
+                    "live": True,
+                })
+            except Exception as e:
+                print(f"Error extracting live article link: {e}")
+        
+        # Limit to top stories
+        return articles[:10]
     
     except Exception as e:
         print(f"Error fetching BBC page: {e}")
@@ -139,7 +179,6 @@ def get_live_article_content(article_url, headers):
     
     try:
         response = requests.get(article_url, headers=headers, timeout=15)
-        
         if response.status_code != 200:
             print(f"Failed to fetch article: {article_url}. Status code: {response.status_code}")
             return None
